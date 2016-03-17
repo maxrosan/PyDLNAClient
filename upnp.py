@@ -10,6 +10,11 @@ class UPNP:
 		self.MCAST_PORT  = 1900
 		self.sock = None
 		self.queueOutput = Queue.PriorityQueue() # time, period, host, port, message
+		self.observers = [ ]
+
+	def addObserver(self, objectReference, matchFields):
+
+		self.observers.append((matchFields, objectReference))
 
 	def createSocket(self):
 	
@@ -35,6 +40,60 @@ class UPNP:
 
 		return message
 
+	def parseLine(self, line):
+
+		key = ''
+		value = ''
+		state = 0 # 0 - key, 1 - value
+
+		for i in range(0, len(line)):
+			if state == 0:
+				if line[i] != ':':
+					key += line[i]
+				else:
+					state = 1
+			elif state == 1:
+				value += line[i]
+
+		key = key.strip()
+		value = value.strip()
+
+		return (key, value)
+
+	def parseReceivedResponse(self, response):
+	
+		lines = response.split('\r\n')
+		
+		headerResponseCode = lines[0]
+
+		if headerResponseCode == 'HTTP/1.1 200 OK':
+
+			hashFields = { }
+
+			for lineIndex in range(1, len(lines)):
+				key, value = self.parseLine(lines[lineIndex])
+				hashFields[key] = value
+				#print key, value
+
+			for observers in self.observers:
+				
+				observerFields = observers[0]
+				observerObjectReference = observers[1]
+
+				matched = True
+
+				for fieldName in observerFields:
+					matched = matched and \
+					( fieldName in hashFields ) and ( hashFields[fieldName] == observerFields[fieldName] )
+	
+				if matched:
+					observerObjectReference.observe(self, hashFields)
+					
+
+		else:
+			print 'Response not processed: ', headerResponseCode
+
+
 	def eventsLoop(self):
 
 		if self.sock == None:
@@ -53,8 +112,11 @@ class UPNP:
 
 			for fdEvent, flag in events:
 				if fdEvent == self.sock.fileno():
+
 					if flag & (select.POLLIN | select.POLLPRI):
-						print self.sock.recv(1024)
+
+						self.parseReceivedResponse(self.sock.recv(1024))
+
 					elif flag & select.POLLOUT:
 						try:
  							timeValue, period, host, port, message = self.queueOutput.get_nowait()
@@ -69,10 +131,6 @@ class UPNP:
 							else:
 								self.queueOutput.put((timeValue, period, host, port, message))
 						
-
-			#if fdRead is self.sock:
-			#	if event == select.POLLIN or event == POLLPRI:
-			#		print self.sock.recv(1024)
 
 	def scheduleMessage(self, timeDelay, period, host, port, message):
 		self.queueOutput.put((time.time() + timeDelay, period, host, port, message))
