@@ -68,6 +68,8 @@ class UPNP:
 
 		if headerResponseCode == 'HTTP/1.1 200 OK':
 
+			print 'Processing response'
+
 			hashFields = { }
 
 			for lineIndex in range(1, len(lines)):

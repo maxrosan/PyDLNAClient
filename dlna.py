@@ -1,33 +1,23 @@
 
-import upnp, urllib2
+import upnp, urllib2, threading, urlparse
 import xml.etree.ElementTree as ET
 
-class Service:
-
-	def __init__(self):
-		self.parameters = { }
-
-class Device:
-
-	def __init__(self):
-		self.parameters = { }
-		self.service = [ ]
+from dlnaservice import Device, Service		
+import util
 
 class DLNAMediaServer:
 
 	def __init__(self, upnp):
 
 		self.upnp = upnp
+		self.observer = [ ] # ( observer object )
 
-	def register(self):
+	def registerObserver(self):
 
 		self.upnp.addObserver(dlna, {'ST': 'urn:schemas-upnp-org:device:MediaServer:1'})
 
 	def downloadRootFile(self, url):
 		return urllib2.urlopen(url)
-
-	def formatTagTitle(self, title):
-		return title.split('}', 1)[1]
 
 	def parseIconList(self, xml):
 		pass
@@ -37,12 +27,12 @@ class DLNAMediaServer:
 		device = Device()
 
 		for field in xml:
-			if self.formatTagTitle(field.tag) == 'serviceList':
-				device.service.append(self.parseServiceList(field.getchildren()))
-			elif self.formatTagTitle(field.tag) == 'iconList':
+			if util.formatTagTitle(field.tag) == 'serviceList':
+				device.service = self.parseServiceList(field.getchildren())
+			elif util.formatTagTitle(field.tag) == 'iconList':
 				self.parseIconList(field.getchildren())
 			else:
-				device.parameters[self.formatTagTitle(field.tag)] = field.text
+				device.parameters[util.formatTagTitle(field.tag)] = field.text
 
 		return device
 
@@ -53,7 +43,7 @@ class DLNAMediaServer:
 		service = Service()
 
 		for field in xml:
-			service.parameters[self.formatTagTitle(field.tag)] = field.text
+			service.parameters[util.formatTagTitle(field.tag)] = field.text
 
 		print service.parameters
 
@@ -64,12 +54,12 @@ class DLNAMediaServer:
 		services = [ ]
 
 		for field in xml:
-			if 'service' == self.formatTagTitle(field.tag):
+			if 'service' == util.formatTagTitle(field.tag):
 				services.append(self.parseService(field.getchildren()))
 
 		return services
 
-	def processXML(self, xmlContents):
+	def processXML(self, xmlContents, fields):
 
 		xml = ET.parse(xmlContents).getroot()
 
@@ -81,7 +71,32 @@ class DLNAMediaServer:
 			if 'Device' in field.tag.title():
 				device = self.parseDevice(field.getchildren())
 
-		print device.parameters, device.service
+		#print device.parameters, device.service
+
+		if device != None:
+
+			device.fields = fields
+			self.downloadActionsDescription(device)
+
+			#self.notifyObservers(device)
+
+	def downloadActionsDescription(self, device):
+
+		threadObserver = threading.Thread(target = DLNAMediaServer.downloadActionsDescriptionThread, args = (device,))
+		threadObserver.start()
+
+
+	def notifyObservers(self, device):
+		
+		for observer in self.observer:
+			threadObserver = threading.Thread(target = DLNAMediaServer.downloadActionsDescriptionThread, args = (observer, device))
+			threadObserver.start()
+
+
+	def addDLNAServiceObserver(self, observer):
+
+		self.observer.append(observer)
+
 
 	def observe(self, upnp, fields):
 
@@ -97,7 +112,17 @@ class DLNAMediaServer:
 			print 'Failed to download root file', e
 
 		else:
-			self.processXML(xmlContents)
+			self.processXML(xmlContents, fields)
+
+
+	@staticmethod
+	def downloadActionsDescriptionThread(device):
+		device.downloadServiceActions()
+		
+
+	@staticmethod
+	def threadObserverObject(observerObject, device):
+		pass
 
 	
 
@@ -106,7 +131,7 @@ if __name__ == '__main__':
 
 	client = upnp.UPNP()
 	dlna = DLNAMediaServer(client)
-	dlna.register()
+	dlna.registerObserver()
 	client.createSocket()
 	client.searchDevices(1)
 	client.eventsLoop()
